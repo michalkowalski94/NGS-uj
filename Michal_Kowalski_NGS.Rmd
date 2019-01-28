@@ -1,0 +1,571 @@
+---
+title: "Next-Generation Sequencing data analysis for expression profiling - Michał Kowalski"
+output: 
+  html_notebook: 
+    fig_height: 8
+    fig_width: 8
+---
+
+#Part 1: Data preparation and getting familiar with R programming language and Bioconductor(code without execution)
+
+Dependencies for first part had been installed via BiocManager 
+
+```{r, eval=FALSE, include=TRUE}
+BiocManager::install("Rsubread", version = "3.8")
+```
+In next step, building of genome index for future purposes (using TAIR9.fa as a reference)
+```{r, eval=FALSE, include=TRUE}
+buildindex(basename='genome.index',reference="../../data/TAIR9.fa"
+,indexSplit=TRUE,memory=4000)
+```
+Using subjunc aligner, an illumina format ".BAM" files were prepared for WT_R1.fastq and OE_1_R1.fastq files
+```{r, eval=FALSE, include=TRUE}
+subjunc(index="genome.index",readfile1="../../data/OE_1_R1.fastq",
+        output_file="OE_1_R1.BAM",
+        nthreads=4,
+        input_format="FASTQ",
+        sortReadsByCoordinates=TRUE)
+
+subjunc(index="genome.index", readfile1="../../data/WT_R1.fastq",
+        output_file="WT_R1.BAM",
+        nthreads=4,
+        input_format="FASTQ",
+        sortReadsByCoordinates=TRUE)
+```
+In further step, base dataframe for for further analysys was obtained by featureCount
+```{r, eval=FALSE, include=TRUE}
+fc <- featureCounts(c("/data/next-gen-sequencing/users/plabaj/OE_1_R1.BAM",
+                      "/data/next-gen-sequencing/users/plabaj/WT_R1_sorted.bam"),
+                    annot.ext="../../data/TAIR9.gtf",isGTFAnnotationFile=TRUE)
+```
+With setting column names, choosing point characters for all genes as black x's and chosing point characters for gene of interest(AT3G01150) red O's, following plots were prepared.
+```{r, eval=FALSE, include=TRUE}
+colnames(fc$stat) <- c("Status","WT","OE1")
+pchs <- rep('x',dim(fc$counts)[1])
+cols <- rep('black',dim(fc$counts)[1])
+names(pchs) <- names(cols) <- rownames(fc$counts)
+sel.gene <- "AT3G01150"
+pchs[sel.gene] <- 'O'
+cols[sel.gene] <- "red"
+```
+<img src="ngseq05/WTvsOE_1/WTvsOE_1-1.jpg">
+
+Gene names were subtracted by using substr() on TR.or and used as new column first column in duplicate of TR.or (TR.gene)
+Dataframe was saved as TAIR_gene.tr
+
+```{r, eval=FALSE, include=TRUE}
+TR.or <- read.table(file="/data/next-gen-sequencing/data/TAIR9.tr")
+TR.gene <- TR.or
+TR.gene[,1] <- substr(TR.gene[,2],1,9)
+write.table(TR.gene, file="TAIR_gene.tr",
+            quote=FALSE, row.names=FALSE,
+            col.names=FALSE)
+```
+Due to hardware problems, further analysis was performed on precomputed solutions from dr. Łabaj.
+
+#Part2: BitSeq expression estimates analysis
+
+Data loading for genes and transcripts
+
+```{r}
+## transcritps
+OE.R1.t <- read.table(file="res/OE_1_R1.counts")
+OE.R2.t <- read.table(file="res/OE_1_R2.counts")
+WT.R1.t <- read.table(file="res/WT_R1.counts")
+WT.R2.t <- read.table(file="res/WT_R2.counts")
+##genes
+OE.R1.g <- read.table(file="res/OE_1_R1_gene.counts")
+OE.R2.g <- read.table(file="res/OE_1_R2_gene.counts")
+WT.R1.g <- read.table(file="res/WT_R1_gene.counts")
+WT.R2.g <- read.table(file="res/WT_R2_gene.counts")
+```
+Computing mean expression
+```{r}
+## mean value of expression for each transcript/gene
+OE.R1.t.exp <- apply(as.matrix(OE.R1.t),1,mean)
+OE.R2.t.exp <- apply(as.matrix(OE.R2.t),1,mean)
+WT.R1.t.exp <- apply(as.matrix(WT.R1.t),1,mean)
+WT.R2.t.exp <- apply(as.matrix(WT.R2.t),1,mean)
+
+OE.R1.g.exp <- apply(as.matrix(OE.R1.g),1,mean)
+OE.R2.g.exp <- apply(as.matrix(OE.R2.g),1,mean)
+WT.R1.g.exp <- apply(as.matrix(WT.R1.g),1,mean)
+WT.R2.g.exp <- apply(as.matrix(WT.R2.g),1,mean)
+```
+Expresion visual analysis on gene level
+```{r, fig.height=8, fig.width=8}
+TR.or <- read.table(file="res/TAIR_gene.tr")
+gene.names <- unique(as.character(TR.or[,1]))
+#Selecting transcript names for further analysis
+transcript.names <- unique(as.character(TR.or[,2]))
+
+pchs <- rep('x',length(gene.names))
+cols <- rep('black',length(gene.names))
+names(pchs) <- names(cols) <- gene.names
+sel.gene <- "AT3G01150"
+
+pchs[sel.gene] <- 'O'
+cols[sel.gene] <- "purple"
+
+plot(log2(OE.R1.g.exp+0.5), log2(OE.R2.g.exp+0.5),
+     xlab="R1", ylab="R2",
+     pch=pchs, col=cols,
+     main="Scatter plot R1 vs R2")
+abline(a=0,b=1, col="red")
+```
+```{r, fig.height=8, fig.width=8}
+plot(log2(WT.R1.g.exp+0.5), log2(OE.R1.g.exp+0.5),
+     xlab="WT", ylab="R2",
+     pch=pchs, col=cols,
+     main="Scatter plot WT vs R2")
+```
+Value of expression for selected gene is clearly bigger in R2 when compared to WT
+
+Visual analysis on transcript level
+```{r, fig.height=8, fig.width=8}
+pchs <- rep('.',dim(TR.or)[1])
+cols <- rep('black',dim(TR.or)[1])
+names(pchs) <- names(cols) <- as.character(TR.or[,2])
+sel.gene <- "AT3G01150"
+sel.trans <- as.character(TR.or[TR.or[,1]==sel.gene,2])
+
+pchs[sel.trans] <- 'X'
+
+cols[sel.trans] <- "purple"
+
+plot(log2(OE.R1.t.exp+0.5), log2(OE.R2.t.exp+0.5),
+     xlab="R1", ylab="R2",
+     pch=pchs, col=cols,
+     main="Scatter plot R1 vs R2")
+abline(a=0,b=1, col="red")
+```
+```{r, fig.height=8, fig.width=8}
+plot(log2(WT.R1.t.exp+0.5), log2(OE.R1.t.exp+0.5),
+     xlab="WT", ylab="R2",
+     pch=pchs, col=cols,
+     main="Scatter plot WT vs R")
+abline(a=0,b=1, col="red")
+```
+Same observations on transcript level. Change of point characters was performed for better visualization.
+
+Visual analysis between same examples (gene vs transcript)
+```{r, fig.height=8, fig.width=8}
+names(OE.R1.g.exp) <- gene.names
+plot(log2(OE.R1.g.exp[as.character(TR.or[,1])]+0.5), log2(OE.R1.t.exp+0.5),
+     xlab="R1", ylab="R2",
+     pch=pchs, col=cols,
+     main="Scatter plot OE.g vs OE.t")
+abline(a=0,b=1, col="red")
+```
+```{r fig.height=8, fig.width=8}
+names(WT.R1.g.exp) <- gene.names
+plot(log2(WT.R1.g.exp[as.character(TR.or[,1])]+0.5), log2(WT.R1.t.exp+0.5),
+     xlab="R1", ylab="R2",
+     pch=pchs, col=cols,
+     main="Scatter plot WT.g vs WT.t")
+abline(a=0,b=1, col="red")
+```
+In Wild type hadn't had any overexpression in selected genes. On the other hand modified organism had one transcript standing out from others and overall increased gene expression.
+
+#Part 3: Part 3: Analysis with Bioconductor packages (limma, edgeR, DESeq2)
+
+Importing necessary libraries
+```{r, include = TRUE, eval=FALSE}
+BiocManager::install("limma", version = "3.8")
+BiocManager::install("edgeR", version = "3.8")
+BiocManager::install("DESeqa2", version = "3.8")
+BiocManager::install("GenomeInfoDb", version = "3.8")
+```
+```{r, include=TRUE, eval=FALSE}
+library(limma)
+library(edgeR)
+library(DESeq2)
+```
+## Analysis using limma
+
+
+<b>On gene level</b>
+```{r, include=TRUE, eval=FALSE}
+##Limma GENES
+names(OE.R1.g.exp) <- names(OE.R2.g.exp) <- names(WT.R1.g.exp) <- names(WT.R2.g.exp) <- gene.names
+genes.merged <- cbind(OE.R1.g.exp, OE.R2.g.exp, WT.R1.g.exp, WT.R2.g.exp)
+colnames(genes.merged) <-  c("OE.R1", "OE.R2", "WT.R1", "WT.R2")
+
+samples <-  substr(colnames(genes.merged), 0, 2)
+design <-  data.frame(OEs = ifelse(samples=="OE",1,0),
+                      WTs=ifelse(samples=="WT",1,0))
+rownames(design) <- colnames(genes.merged)
+cm <-  makeContrasts(OEvsWT = OEs-WTs,
+                     levels = design)
+dge <-  DGEList(counts=genes.merged)
+dge <-  calcNormFactors(dge)
+```
+```{r}
+summary(dge$counts)
+```
+
+
+
+
+
+```{r, include=TRUE, eval=FALSE}
+v <-  voom(dge, design, plot=FALSE)
+```
+```{r}
+summary(v$E)
+```
+
+
+
+
+
+
+```{r, include=TRUE, eval=FALSE}
+f.t <- lmFit(v, design)
+cf <- contrasts.fit(f.t, cm)
+fe <- eBayes(cf, proportion=0.01)
+adj.method='BH'
+limma.countsTMMvoom.genes <- topTable(fe, number=Inf, adjust.method=adj.method, sort.by="none")
+```
+```{r}
+head(limma.countsTMMvoom.genes,10)
+```
+
+
+
+
+```{r, include=TRUE, eval=FALSE}
+sum(limma.countsTMMvoom.genes$adj.P.Val < 0.05)
+which(limma.countsTMMvoom.genes$adj.P.Val < 0.05)
+limma.countsTMMvoom.genes[which(limma.countsTMMvoom.genes$adj.P.Val < 0.05),]
+```
+
+
+
+
+
+
+
+```{r fig.height=8, fig.width=8}
+pchs <- rep('.',length(gene.names))
+cols <- rep('black',length(gene.names))
+names(pchs) <- names(cols) <- gene.names
+sel.gene <- "AT3G01150"
+
+pchs[sel.gene] <- 'O'
+cols[sel.gene] <- "purple"
+
+plot(limma.countsTMMvoom.genes$AveExpr, limma.countsTMMvoom.genes$logFC,xlab='Average Expression', ylab='logFC',main = 'Scatter plot AvgExp/logFC Genes', pch=pchs, col=cols)
+```
+<b>On transcript level</b>
+
+```{r, include=TRUE, eval=FALSE}
+## For transcripts
+
+
+names(OE.R1.t.exp) <- names(OE.R2.t.exp) <- names(WT.R1.t.exp) <- names(WT.R2.t.exp) <- transcript.names
+transcripts.merged <- cbind(OE.R1.t.exp, OE.R2.t.exp, WT.R1.t.exp, WT.R2.t.exp)
+colnames(transcripts.merged) <-  c("OE.R1", "OE.R2", "WT.R1", "WT.R2")
+
+samples <-  substr(colnames(transcripts.merged), 0, 2)
+design <-  data.frame(OEs = ifelse(samples=="OE",1,0),
+                      WTs=ifelse(samples=="WT",1,0))
+rownames(design) <- colnames(transcripts.merged)
+cm <-  makeContrasts(OEvsWT = OEs-WTs,
+                     levels = design)
+dge <-  DGEList(counts=transcripts.merged)
+dge <-  calcNormFactors(dge)
+```
+
+
+```{r}
+summary(dge$counts)
+```
+
+
+
+```{r, include=TRUE, eval=FALSE}
+v <-  voom(dge, design, plot=FALSE)
+```
+
+
+```{r}
+summary(v$E)
+```
+
+```{r, include=TRUE, eval=FALSE}
+f.t <- lmFit(v, design)
+cf <- contrasts.fit(f.t, cm)
+fe <- eBayes(cf, proportion=0.01)
+fe
+
+adj.method='BH'
+limma.countsTMMvoom.transcripts <- topTable(fe, number=Inf, adjust.method=adj.method, sort.by="none")
+```
+
+```{r}
+head(limma.countsTMMvoom.transcripts)
+```
+
+```{r, include=TRUE, eval=FALSE}
+## X axis Average Expression
+## Y axis logFC
+sum(limma.countsTMMvoom.transcripts$adj.P.Val < 0.05)
+which(limma.countsTMMvoom.transcripts$adj.P.Val < 0.05)
+limma.countsTMMvoom.transcripts[which(limma.countsTMMvoom.transcripts$adj.P.Val < 0.05),]
+
+```
+
+
+```{r, fig.width=8, fig.height=8}
+pchs <- rep('.',dim(TR.or)[1])
+cols <- rep('black',dim(TR.or)[1])
+names(pchs) <- names(cols) <- as.character(TR.or[,2])
+sel.gene <- "AT3G01150"
+sel.trans <- as.character(TR.or[TR.or[,1]==sel.gene,2])
+
+pchs[sel.trans] <- 'O'
+
+cols[sel.trans] <- "purple"
+
+plot(limma.countsTMMvoom.transcripts$AveExpr, limma.countsTMMvoom.transcripts$logFC,xlab='Average Expression', ylab='logFC', main='Scatter plot AvgExp/logFC Transcripts' , pch=pchs, col=cols)
+
+```
+<b>Summary</b>
+
+The simpliest (in usage) method of analysis.
+Limma, built by the creators of edgeR (and using it as backbone) analyses data by gene-wise building linear models. For each gene there is a vector of gene expression values (provided in dataset), design matrix that serves as metadata to these values and the coefficients of interest. In analyses entire experiments as an integrated whole (without splitting data into batches). It allows to model correlations that may exist between samples due to redundant mesures or other causes. Limma does not serve as model for series of pairwise comparisons.
+
+<img src = "limma.jpg">
+
+[More on limma]("https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4402510/")
+
+
+## Analysis using DESeq2
+
+<b>On gene level</b>
+```{r, include=TRUE, eval=FALSE}
+##For Genes
+OE.R1.g.exp.int <- as.integer(OE.R1.g.exp)
+OE.R2.g.exp.int <- as.integer(OE.R2.g.exp)
+WT.R1.g.exp.int <- as.integer(WT.R1.g.exp)
+WT.R2.g.exp.int <- as.integer(WT.R2.g.exp)
+
+##For Genes
+
+names(OE.R1.g.exp.int) <- names(OE.R2.g.exp.int) <- names(WT.R1.g.exp.int) <- names(WT.R2.g.exp.int) <- gene.names
+genes.merged <- cbind(OE.R1.g.exp.int, OE.R2.g.exp.int, WT.R1.g.exp.int, WT.R2.g.exp.int)
+colnames(genes.merged) <-  c("OE.R1", "OE.R2", "WT.R1", "WT.R2")
+
+samples <- substr(colnames(genes.merged), 0, 2)
+head(genes.merged)
+
+coldata <- data.frame(condition=samples, type=rep('single-end',4))
+rownames(coldata) <- colnames(genes.merged)
+head(coldata)
+
+
+names(coldata)
+
+design <-  data.frame(OEs =
+                      ifelse(samples=="OE",1,0),
+                  WTs=ifelse(samples=="WT",1,0))
+rownames(design) <- colnames(genes.merged)
+
+dds <- DESeqDataSetFromMatrix(genes.merged, coldata, ~ condition)
+dds <- DESeq(dds)
+```
+
+
+```{r}
+resultsNames(dds)
+```
+
+```{r, fig.width=8, fig.height=8}
+resn <- results(dds)
+
+resn[sel.gene,]
+
+pchs <- rep('.',length(gene.names))
+cols <- rep('black',length(gene.names))
+names(pchs) <- names(cols) <- gene.names
+sel.gene <- "AT3G01150"
+
+pchs[sel.gene] <- 'O'
+cols[sel.gene] <- "purple"
+
+
+
+
+plot(resn$baseMean, resn$log2FoldChange,xlab='Average Expression', ylab='logFC', main='Scatter plot AvgExp/logFC Genes DESeq2' , pch=pchs, col=cols)
+
+```
+<b>On transcript level</b>
+```{r, include=TRUE, eval=FALSE}
+
+## For transcripts
+OE.R1.t.exp.int <- as.integer(OE.R1.t.exp)
+OE.R2.t.exp.int <- as.integer(OE.R2.t.exp)
+WT.R1.t.exp.int <- as.integer(WT.R1.t.exp)
+WT.R2.t.exp.int <- as.integer(WT.R2.t.exp)
+
+names(OE.R1.t.exp.int) <- names(OE.R2.t.exp.int) <- names(WT.R1.t.exp.int) <- names(WT.R2.t.exp.int) <- transcript.names
+transcripts.merged <- cbind(OE.R1.t.exp.int, OE.R2.t.exp.int, WT.R1.t.exp.int, WT.R2.t.exp.int)
+colnames(transcripts.merged) <-  c("OE.R1", "OE.R2", "WT.R1", "WT.R2")
+
+
+samples <- substr(colnames(transcripts.merged), 0, 2)
+head(transcripts.merged)
+
+coldata <- data.frame(condition=samples, type=rep('single-end',4))
+rownames(coldata) <- colnames(genes.merged)
+
+design <-  data.frame(OEs =
+                      ifelse(samples=="OE",1,0),
+                  WTs=ifelse(samples=="WT",1,0))
+
+rownames(design) <- colnames(transcripts.merged)
+coldata
+dds <- DESeqDataSetFromMatrix(transcripts.merged, coldata, ~ condition)
+dds <- DESeq(dds)
+```
+```{r}
+resultsNames(dds)
+resn <- results(dds)
+sel.trans <- as.character(TR.or[TR.or[,1]==sel.gene,2])
+```
+```{r, fig.width=8, fig.height=8}
+pchs <- rep('.',dim(TR.or)[1])
+cols <- rep('black',dim(TR.or)[1])
+names(pchs) <- names(cols) <- as.character(TR.or[,2])
+
+pchs[sel.trans] <- 'O'
+
+cols[sel.trans] <- "purple"
+
+plot(resn$baseMean, resn$log2FoldChange,xlab='Average Expression', ylab='logFC', main='Scatter plot AvgExp/logFC Genes DESeq2' , pch=pchs, col=cols)
+
+
+```
+```{r}
+resn[sel.trans,]
+```
+<b>Summary</b>
+DESeq2 provides analysis using differential expression by using generalized negative binomial linear models.
+Results obtained by DESeq2 are different than those obtained by limma or edgeR because of that, for example on the plots we can see that gene and transcript of interest are marked on negative scale of logFC axis. Average expression axis also differs. To fully understand how exactly DESeq2 works one must study [this]("https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8") publication. Some may say that DESeq2 is state of the art.
+
+
+## Analysonesis using edgeR
+
+<b>On gene level</b>
+```{r, include=TRUE, eval=FALSE}
+##edgeR genes
+
+names(OE.R1.g.exp) <- names(OE.R2.g.exp) <- names(WT.R1.g.exp) <- names(WT.R2.g.exp) <- gene.names
+genes.merged <- cbind(OE.R1.g.exp, OE.R2.g.exp, WT.R1.g.exp, WT.R2.g.exp)
+colnames(genes.merged) <-  c("OE.R1", "OE.R2", "WT.R1", "WT.R2")
+
+samples <-  substr(colnames(genes.merged), 0, 2)
+design <-  data.frame(OEs = ifelse(samples=="OE",1,0),
+                      WTs=ifelse(samples=="WT",1,0))
+rownames(design) <- colnames(genes.merged)
+
+dge <- DGEList(counts=genes.merged)
+dge <- calcNormFactors(dge)
+dge <- estimateDisp(dge, design)
+
+fit <- glmQLFit(dge, design)
+lrt <- glmLRT(fit)
+cm <-  makeContrasts(OEvsWT = OEs-WTs,
+                     levels = design)
+qlf <- glmQLFTest(fit, contrast=cm)
+```
+
+
+```{r}
+topTags(qlf)
+```
+```{r}
+edgeR.genes <- topTags(qlf)
+edgeR.genes <- qlf$table
+
+head(edgeR.genes,10)
+```
+
+```{r, fig.height=8, fig.width=8}
+pchs <- rep('.',length(gene.names))
+cols <- rep('black',length(gene.names))
+names(pchs) <- names(cols) <- gene.names
+sel.gene <- "AT3G01150"
+
+pchs[sel.gene] <- 'O'
+cols[sel.gene] <- "purple"
+
+
+plot(edgeR.genes$logCPM,edgeR.genes$logFC,xlab='Average Expression', ylab='logFC',main = 'Scatter plot AvgExp/logFC Genes edgeR', pch=pchs, col=cols)
+```
+
+<b> On transcript level</b>
+
+```{r, include=TRUE, eval=FALSE}
+##edgeR Transcripts
+
+names(OE.R1.t.exp) <- names(OE.R2.t.exp) <- names(WT.R1.t.exp) <- names(WT.R2.t.exp) <- transcript.names
+transcripts.merged <- cbind(OE.R1.t.exp, OE.R2.t.exp, WT.R1.t.exp, WT.R2.t.exp)
+colnames(transcripts.merged) <-  c("OE.R1", "OE.R2", "WT.R1", "WT.R2")
+
+samples <-  substr(colnames(transcripts.merged), 0, 2)
+design <-  data.frame(OEs = ifelse(samples=="OE",1,0),
+                      WTs=ifelse(samples=="WT",1,0))
+rownames(design) <- colnames(transcripts.merged)
+cm <-  makeContrasts(OEvsWT = OEs-WTs,
+                     levels = design)
+
+dge <- DGEList(counts=transcripts.merged)
+dge <- calcNormFactors(dge)
+dge <- estimateDisp(dge, design)
+
+fit <- glmQLFit(dge, design)
+lrt <- glmLRT(fit)
+cm <-  makeContrasts(OEvsWT = OEs-WTs,
+                     levels = design)
+qlf <- glmQLFTest(fit, contrast=cm)
+```
+
+```{r}
+topTags(qlf)
+```
+
+```{r, fig.width=8, fig.height=8}
+edgeR.transcripts <- qlf$table
+
+sel.gene <- "AT3G01150"
+
+
+pchs <- rep('.',dim(TR.or)[1])
+cols <- rep('black',dim(TR.or)[1])
+names(pchs) <- names(cols) <- as.character(TR.or[,2])
+sel.gene <- "AT3G01150"
+sel.trans <- as.character(TR.or[TR.or[,1]==sel.gene,2])
+
+pchs[sel.trans] <- 'O'
+
+cols[sel.trans] <- "purple"
+
+plot(edgeR.transcripts$logCPM,edgeR.transcripts$logFC,xlab='Average Expression', ylab='logFC',main = 'Scatter plot AvgExp/logFC Genes edgeR', pch=pchs, col=cols)
+
+```
+<b>Summary</b>
+
+edgeR for limma is like Tensorflow for Pytorch.
+Low level Data analysis module that can provide the same solution analogous functions and results as higher level (and newer) one. edgeR counts data by using an overdispersed Poisson model, then uses emirical Bayes analysis procedure to moredate the degree of orevdispersion actoss genes. Data is modeled as negative distributed.
+
+
+##Conclusions
+Easies way to perform analysis was provided by limma.
+Real reasons why DESeq2 models logFC output as negative of edgeR or limma is still a mystery to me and I'll find it out after exams
+
+
+##Conclusion about course:
+Using jupyter notebook or RStudio instead of emacs could be easier for most of participants. Output produced by them is more human-readible for those who just started their journey with programming.
+
